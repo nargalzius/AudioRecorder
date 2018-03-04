@@ -1,0 +1,28 @@
+doctype html5
+html(lang="en")
+
+	head
+
+		title AUDIO RECORDING
+
+		meta(http-equiv="Content-Type",content="text/html; charset=utf-8")
+		meta(name="viewport", content="width=960, initial-scale=1, minimum-scale=0.5, maximum-scale=1")
+		
+		link(rel="stylesheet", type="text/css", href="style.css")
+		
+		script(type="text/javascript", src="//unpkg.com/current-device/umd/current-device.min.js")
+		script(type="text/javascript", src="//cdnjs.cloudflare.com/ajax/libs/jquery/3.3.1/jquery.min.js")
+		//- script(type="text/javascript", src="//cdnjs.cloudflare.com/ajax/libs/lodash.js/4.17.5/lodash.min.js")
+		script(type="text/javascript", src="AudioRecorder-min.js")
+		script(type="text/javascript", src="library.js")
+	body
+
+		#mainContainer.rel
+			button#enable Enable Microphone
+			button#startRecording Start Recording
+			button#stopRecording Stop Recording
+			button#download Download
+
+			#console
+
+		script(type="text/javascript", src="main.js")

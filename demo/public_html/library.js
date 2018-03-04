@@ -1,0 +1,1 @@
+"use strict";function q$(e){return document.querySelector(e)}
