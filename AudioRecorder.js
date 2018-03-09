@@ -1,7 +1,7 @@
 /*!
  *  HTML AUDIO RECORDER
  *
- *  1.0
+ *  1.1
  *
  *  author: Carlo J. Santos
  *  email: carlosantos@gmail.com
@@ -12,10 +12,12 @@
 
 window.AudioContext = window.AudioContext || window.webkitAudioContext;
 
-function AudioRecorder() {}
+function AudioRecorder() {
+	this.checkForMobile();
+}
 
 AudioRecorder.prototype = {
-    ismobile: false,
+	ismobile: false,
 	debug: false,
 	autodetect: true,
 	currentVolume: 0,
@@ -35,50 +37,53 @@ AudioRecorder.prototype = {
 		mimeType: 'audio/webm',
 	},
 	volume: {
-		threshold: 0.3,
+		threshold: 3,
+		timeout: 1500,
+		use_slow: false,
 		raw: 0,
 		slow: 0,
 		clip: 0,
 	},
 	vol: 0,
 	ave: 0,
+	processorActive: false,
 	isSafari() {
 		return /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
 	},
 	checkForMobile() {
-        const DESKTOP_AGENTS = [
-            'desktop'
-        ];
+		const DESKTOP_AGENTS = [
+			'desktop'
+		];
 
-        let mobileFlag = true;
+		let mobileFlag = true;
 
-        if( window['device'] ) {
-            // USE DEVICEJS IF AVAILABLE
-            for (let i = 0; i < DESKTOP_AGENTS.length; i++) {
-                let regex;
-                    regex = new RegExp(DESKTOP_AGENTS[i], 'i');
+		if( window['device'] ) {
+			// USE DEVICEJS IF AVAILABLE
+			for (let i = 0; i < DESKTOP_AGENTS.length; i++) {
+				let regex;
+					regex = new RegExp(DESKTOP_AGENTS[i], 'i');
 
-                if( window.document.documentElement.className.match(regex) ) {
-                    mobileFlag = false;
-                }
-            }
-        } else {
-            // BACKUP [RUDIMENTARY] DETECTION
-            mobileFlag = 'ontouchstart' in window;
-        }
+				if( window.document.documentElement.className.match(regex) ) {
+					mobileFlag = false;
+				}
+			}
+		} else {
+			// BACKUP [RUDIMENTARY] DETECTION
+			mobileFlag = 'ontouchstart' in window;
+		}
 
-        if( mobileFlag ) {
-            this.ismobile = true;
-            this.trace("mobile browser detected");
-        } else {
-            this.ismobile = false;
-            this.trace("desktop browser detected");
-        }
-    },
-	init() {
-		this.checkForMobile();
-		this.trace('init');
+		if( mobileFlag ) {
+			this.ismobile = true;
+			this.trace("mobile browser detected");
+		} else {
+			this.ismobile = false;
+			this.trace("desktop browser detected");
+		}
 	},
+	// init() {
+	//     this.checkForMobile();
+	//     this.trace('init');
+	// },
 	trace(e) {
 		if (this.debug) console.log(e);
 	},
@@ -108,15 +113,7 @@ AudioRecorder.prototype = {
 			}
 		}
 
-		var multiplier = 1
-
-		// SAFARI ADJUSTMENT
-		if(this.isSafari())
-			multiplier = 0.094;
-
-		// ANDROID ADJUSTMENT
-		if(this.ismobile && !isSafari())
-			multiplier = 0.0094;
+		var multiplier = 1;
 
 		this.vol = Math.sqrt(sum / left.length) * multiplier;
 		this.volume.raw = (this.vol * 100).toFixed(3);
@@ -126,16 +123,19 @@ AudioRecorder.prototype = {
 
 		this.volume.clip = clipcount / left.length;
 
-		if (this.volume.slow > this.volume.threshold) {
-			this.isSpeaking = true;
-			clearTimeout(this.speakingTimeout);
-		} else {
-			if (this.isSpeaking) {
-				this.isSpeaking = false;
+
+		if( this.processorActive ) {
+			if ( ( this.volume.use_slow ? this.volume.slow : this.volume.raw ) > this.volume.threshold ) {
+				this.isSpeaking = true;
 				clearTimeout(this.speakingTimeout);
-				this.speakingTimeout = setTimeout(() => {
-					if (this.autodetect) this.stopRecording();
-				}, 500);
+			} else {
+				if (this.isSpeaking) {
+					this.isSpeaking = false;
+					clearTimeout(this.speakingTimeout);
+					this.speakingTimeout = setTimeout(() => {
+						if ( this.autodetect ) this.stopRecording();
+					}, this.volume.timeout);
+				}
 			}
 		}
 		this.callback_onProgress();
@@ -146,6 +146,9 @@ AudioRecorder.prototype = {
 	startRecording(bool) {
 		this.audioContext = new AudioContext();
 
+		// CLEANUP
+		if(this.blob) this.blob = null;
+		
 		if(bool)
 			this.ready = false;
 		else
@@ -200,18 +203,24 @@ AudioRecorder.prototype = {
 		if( !this.ready ) {
 			this.audioContext.close();
 			this.processor.disconnect();
-			this.tracks.forEach(track => track.stop());
+			this.disconnectMic();
 			this.ready = true;
 			this.callback_micSuccess();
 			return;
 		}
 
 		// GIVE THE NODE A FUNCTION TO PROCESS AUDIO EVENTS
-		this.processor.onaudioprocess = (e) => {
-			this.onAudioProcess(e)
-		};
+		this.processor.onaudioprocess = (e) => this.onAudioProcess(e);
+		
+		// DELAY LISTENING TO IGNORE INITIAL SPIKES IN VOLUME
+		setTimeout(()=>{
+			this.processorActive = true;
+		}, 800);
+
 		this.analyzer(this.audioContext);
 		this.callback_startRecording();
+
+		
 	},
 
 	clearRecordedData() {
@@ -222,10 +231,14 @@ AudioRecorder.prototype = {
 	stopRecording() {
 
 		if(this.isRecording) {
+			this.processorActive = false;
 			this.isRecording = false;
 			this.audioContext.close();
 			this.processor.disconnect();
-			this.tracks.forEach(track => track.stop());
+
+			// MIC RELEASE FIX FOR MOBILE?
+			if(!this.ismobile)
+				this.disconnectMic();
 
 
 			this.mergeLeftRightBuffers({
@@ -246,8 +259,8 @@ AudioRecorder.prototype = {
 				this.bufferSize = this.config.bufferLen;
 				this.length = this.recordingLength;
 
-				this.callback_stopRecording(this.blob);
 				this.clearRecordedData();
+				this.callback_stopRecording(this.blob);
 
 			});
 		}
@@ -264,7 +277,10 @@ AudioRecorder.prototype = {
 		
 		return worker;
 	},
-
+	disconnectMic() {
+		if(this.tracks.length) this.tracks.forEach(track => track.stop());
+	},
+	
 	callback_stopRecording(e) {
 		this.trace('------------------------- callback_stopRecording');
 		this.trace(e)
